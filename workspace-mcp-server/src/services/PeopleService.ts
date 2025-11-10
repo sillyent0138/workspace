@@ -1,0 +1,99 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { google, people_v1 } from 'googleapis';
+import { Auth } from 'googleapis';
+import { AuthManager } from '../auth/AuthManager';
+import { logToFile } from '../utils/logger';
+import { gaxiosOptions } from '../utils/GaxiosConfig';
+
+export class PeopleService {
+    private people: people_v1.People;
+
+    constructor(private authManager: AuthManager) {
+        this.people = {} as people_v1.People;
+    }
+
+    public async initialize(): Promise<void> {
+        const auth: Auth.OAuth2Client = await this.authManager.getAuthenticatedClient();
+        const options = { ...gaxiosOptions, auth };
+        this.people = google.people({ version: 'v1', ...options });
+    }
+
+    public getUserProfile = async ({ userId, email, name }: { userId?: string, email?: string, name?: string }) => {
+        logToFile(`[PeopleService] Starting getUserProfile with: userId=${userId}, email=${email}, name=${name}`);
+        try {
+            if (!userId && !email && !name) {
+                throw new Error('Either userId, email, or name must be provided.');
+            }
+            if (userId) {
+                const resourceName = userId.startsWith('people/') ? userId : `people/${userId}`;
+                const res = await this.people.people.get({
+                    resourceName,
+                    personFields: 'names,emailAddresses',
+                });
+                logToFile(`[PeopleService] Finished getUserProfile for user: ${userId}`);
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: JSON.stringify({ results: [{ person: res.data }] })
+                    }]
+                };
+            } else if (email || name) {
+                const query = email || name;
+                const res = await this.people.people.searchDirectoryPeople({
+                    query,
+                    readMask: 'names,emailAddresses',
+                    sources: ['DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT', 'DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'],
+                });
+                logToFile(`[PeopleService] Finished getUserProfile search for: ${query}`);
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: JSON.stringify(res.data)
+                    }]
+                };
+            } else {
+                throw new Error('Either userId, email, or name must be provided.');
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logToFile(`[PeopleService] Error during people.getUserProfile: ${errorMessage}`);
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: JSON.stringify({ error: errorMessage })
+                }]
+            };
+        }
+    }
+
+    public getMe = async () => {
+        logToFile(`[PeopleService] Starting getMe`);
+        try {
+            const res = await this.people.people.get({
+                resourceName: 'people/me',
+                personFields: 'names,emailAddresses',
+            });
+            logToFile(`[PeopleService] Finished getMe`);
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: JSON.stringify(res.data)
+                }]
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logToFile(`[PeopleService] Error during people.getMe: ${errorMessage}`);
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: JSON.stringify({ error: errorMessage })
+                }]
+            };
+        }
+    }
+}
